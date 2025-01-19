@@ -1,4 +1,3 @@
-// src/services/api.js
 import CryptoJS from 'crypto-js';
 
 const API_KEY = import.meta.env.VITE_CRYPTO_COM_API_KEY;
