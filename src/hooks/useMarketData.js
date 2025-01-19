@@ -1,34 +1,47 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { fetchMarketData } from '../services/api';
-import { websocketService } from '../services/websocket';
 
-export const useMarketData = () => {
+export const useMarketData = (updateInterval = 30000) => {
+  // Increased interval to 30 seconds
   const [data, setData] = useState(null);
-  const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        const marketData = await fetchMarketData();
-        setData(marketData);
-        setLoading(false);
-      } catch (err) {
-        setError(err.message);
-        setLoading(false);
-      }
-    };
+  const updateData = useCallback(async () => {
+    try {
+      const newData = await fetchMarketData();
+      setData((prevData) => {
+        if (!prevData) return newData;
 
-    fetchData();
-    const unsubscribe = websocketService.subscribe((wsData) => {
-      setData((prev) => ({
-        ...prev,
-        ...wsData,
-      }));
-    });
-
-    return () => unsubscribe();
+        // Compare with previous data
+        return {
+          ...newData,
+          prices: Object.entries(newData.prices).reduce(
+            (acc, [coin, price]) => {
+              acc[coin] = {
+                value: price,
+                changed: prevData.prices[coin] !== price,
+              };
+              return acc;
+            },
+            {}
+          ),
+        };
+      });
+      setError(null);
+    } catch (err) {
+      setError(err.message);
+      console.error('Error updating market data:', err);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  return { data, error, loading };
+  useEffect(() => {
+    updateData();
+    const interval = setInterval(updateData, updateInterval);
+    return () => clearInterval(interval);
+  }, [updateData, updateInterval]);
+
+  return { data, loading, error, refetch: updateData };
 };

@@ -2,7 +2,7 @@ import { Bell, Settings, User } from 'lucide-react';
 import { useWallet } from '../../hooks/useWallet';
 
 const Header = () => {
-    const { notifications } = useWallet();
+    const { notifications = [] } = useWallet() || {};
 
     return (
         <header className="h-16 bg-[#111111] border-b border-[#2A2A2A] px-6">

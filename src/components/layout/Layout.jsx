@@ -1,9 +1,13 @@
+import { Routes, Route } from 'react-router-dom';
 import { useWallet } from '../../hooks/useWallet';
 import Header from './Header';
 import Sidebar from './Sidebar';
-import PropTypes from 'prop-types';
+import Dashboard from '../../pages/Dashboard';
+import Portfolio from '../../pages/Portfolio';
+import Settings from '../../pages/Settings';
+import Transactions from '../../pages/Transactions';
 
-const Layout = ({ children }) => {
+const Layout = () => {
     const { error } = useWallet();
 
     return (
@@ -17,15 +21,16 @@ const Layout = ({ children }) => {
                             {error}
                         </div>
                     )}
-                    {children}
+                    <Routes>
+                        <Route path="/" element={<Dashboard />} />
+                        <Route path="/portfolio" element={<Portfolio />} />
+                        <Route path="/transactions" element={<Transactions />} />
+                        <Route path="/settings" element={<Settings />} />
+                    </Routes>
                 </main>
             </div>
         </div>
     );
-};
-
-Layout.propTypes = {
-    children: PropTypes.node.isRequired,
 };
 
 export default Layout;

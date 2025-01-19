@@ -1,206 +1,127 @@
-import CryptoJS from 'crypto-js';
+const COINGECKO_API = 'https://api.coingecko.com/api/v3';
 
-const API_KEY = import.meta.env.VITE_CRYPTO_COM_API_KEY;
-const API_SECRET = import.meta.env.VITE_CRYPTO_COM_API_SECRET;
-const API_URL = import.meta.env.VITE_CRYPTO_COM_API_URL;
+const SUPPORTED_COINS = [
+  'bitcoin',
+  'ethereum',
+  'dogecoin',
+  'ripple',
+  'cardano',
+  'solana',
+  'polkadot',
+  'chainlink',
+  'litecoin',
+  'avalanche-2',
+  'matic-network',
+  'stellar',
+  'cosmos',
+  'tron',
+  'monero',
+];
 
-// Generate signature for API authentication
-const generateSignature = (method, endpoint, data = '') => {
-  const timestamp = Math.floor(Date.now() / 1000);
-  const paramsString = data ? JSON.stringify(data) : '';
-  const signString = `${timestamp}${method}${endpoint}${paramsString}`;
-
-  const signature = CryptoJS.HmacSHA256(signString, API_SECRET).toString();
-
-  return {
-    signature,
-    timestamp,
-  };
-};
-
-// Base API call function
-const apiCall = async (method, endpoint, data = null) => {
-  const { signature, timestamp } = generateSignature(method, endpoint, data);
-
-  const headers = {
-    'Content-Type': 'application/json',
-    'api-key': API_KEY,
-    sig: signature,
-    nonce: timestamp.toString(),
-  };
-
-  const config = {
-    method,
-    headers,
-    body: data ? JSON.stringify(data) : undefined,
-  };
-
+export const fetchMarketData = async () => {
   try {
-    const response = await fetch(`${API_URL}${endpoint}`, config);
+    // Using CoinGecko's markets endpoint for more comprehensive data
+    const response = await fetch(
+      `${COINGECKO_API}/coins/markets?vs_currency=usd&ids=${SUPPORTED_COINS.join(
+        ','
+      )}&order=market_cap_desc&per_page=15&page=1&sparkline=true&price_change_percentage=1h,24h,7d`
+    );
 
     if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.message || 'API request failed');
+      throw new Error(`HTTP error! status: ${response.status}`);
     }
 
-    return await response.json();
+    const data = await response.json();
+
+    return {
+      prices: data.reduce((acc, coin) => {
+        acc[coin.id] = coin.current_price;
+        return acc;
+      }, {}),
+      changes: data.reduce((acc, coin) => {
+        acc[coin.id] = {
+          '1h': coin.price_change_percentage_1h_in_currency,
+          '24h': coin.price_change_percentage_24h,
+          '7d': coin.price_change_percentage_7d,
+        };
+        return acc;
+      }, {}),
+      volumes: data.reduce((acc, coin) => {
+        acc[coin.id] = coin.total_volume;
+        return acc;
+      }, {}),
+      marketCaps: data.reduce((acc, coin) => {
+        acc[coin.id] = coin.market_cap;
+        return acc;
+      }, {}),
+      lastUpdated: new Date().toISOString(),
+    };
   } catch (error) {
-    console.error(`API Error (${endpoint}):`, error);
+    console.error('API Error:', error);
     throw error;
   }
 };
 
-// Get current market data for specified symbols
-export const fetchMarketData = async (
-  symbols = ['BTC_USDT', 'ETH_USDT', 'DOGE_USDT']
-) => {
+// Fetch real transaction history from CoinGecko
+export const fetchTransactionHistory = async (coinId) => {
   try {
-    const response = await apiCall('GET', '/public/get-ticker', {
-      instrument_name: symbols.join(','),
-    });
+    // Get detailed market data
+    const [marketChartResponse, tradeDataResponse] = await Promise.all([
+      fetch(
+        `${COINGECKO_API}/coins/${coinId}/market_chart?vs_currency=usd&days=30&interval=daily`
+      ),
+      fetch(
+        `${COINGECKO_API}/coins/${coinId}/tickers?include_exchange_logo=true`
+      ),
+    ]);
 
-    const formattedData = response.result.data.reduce(
-      (acc, item) => {
-        const symbol = item.instrument_name.split('_')[0].toLowerCase();
-        acc.prices[symbol] = parseFloat(item.last_trade_price);
-        acc.changes[symbol] = parseFloat(item.price_change_24h);
-        return acc;
-      },
-      { prices: {}, changes: {} }
-    );
-
-    return formattedData;
-  } catch (error) {
-    throw new Error('Failed to fetch market data: ' + error.message);
-  }
-};
-
-// Get account balances
-export const fetchWalletBalance = async () => {
-  try {
-    const response = await apiCall('GET', '/private/get-account-summary');
-
-    const balances = response.result.accounts.reduce((acc, account) => {
-      acc[account.currency.toLowerCase()] = parseFloat(account.balance);
-      return acc;
-    }, {});
-
-    return balances;
-  } catch (error) {
-    throw new Error('Failed to fetch wallet balance: ' + error.message);
-  }
-};
-
-// Get order history
-export const fetchOrderHistory = async (startTime, endTime) => {
-  try {
-    const response = await apiCall('GET', '/private/get-order-history', {
-      start_time: startTime,
-      end_time: endTime,
-    });
-
-    return response.result.order_list;
-  } catch (error) {
-    throw new Error('Failed to fetch order history: ' + error.message);
-  }
-};
-
-// Place a new order
-export const placeOrder = async (
-  instrumentName,
-  side,
-  type,
-  quantity,
-  price = null
-) => {
-  try {
-    const orderData = {
-      instrument_name: instrumentName,
-      side: side.toUpperCase(), // BUY or SELL
-      type: type.toUpperCase(), // LIMIT or MARKET
-      quantity: quantity.toString(),
-    };
-
-    if (type === 'LIMIT') {
-      orderData.price = price.toString();
+    if (!marketChartResponse.ok || !tradeDataResponse.ok) {
+      throw new Error('Failed to fetch transaction data');
     }
 
-    const response = await apiCall('POST', '/private/create-order', orderData);
-    return response.result;
+    const marketChartData = await marketChartResponse.json();
+    const tradeData = await tradeDataResponse.json();
+
+    // Get recent trades from major exchanges
+    const recentTrades = tradeData.tickers
+      .filter((ticker) => ticker.trust_score === 'green')
+      .slice(0, 50)
+      .map((ticker) => ({
+        id: `${ticker.base}-${ticker.target}-${Date.now()}`,
+        exchange: ticker.market.name,
+        base: ticker.base,
+        target: ticker.target,
+        price: ticker.last,
+        volume: ticker.volume,
+        timestamp: new Date().toISOString(),
+        type: ticker.bid > ticker.last ? 'sell' : 'buy',
+      }));
+
+    return recentTrades;
   } catch (error) {
-    throw new Error('Failed to place order: ' + error.message);
+    console.error('Error fetching transaction history:', error);
+    return [];
   }
 };
 
-// Cancel an order
-export const cancelOrder = async (orderId) => {
+// Cache implementation with shorter duration for real-time data
+const cache = new Map();
+const CACHE_DURATION = 10000; // 10 seconds
+
+export const fetchMarketDataWithCache = async () => {
+  const now = Date.now();
+  const cached = cache.get('marketData');
+
+  if (cached && now - cached.timestamp < CACHE_DURATION) {
+    return cached.data;
+  }
+
   try {
-    const response = await apiCall('POST', '/private/cancel-order', {
-      order_id: orderId,
-    });
-    return response.result;
+    const data = await fetchMarketData();
+    cache.set('marketData', { data, timestamp: now });
+    return data;
   } catch (error) {
-    throw new Error('Failed to cancel order: ' + error.message);
+    console.error('Cache fetch error:', error);
+    throw error;
   }
-};
-
-// Get trading pairs information
-export const getTradingPairs = async () => {
-  try {
-    const response = await apiCall('GET', '/public/get-instruments');
-    return response.result.instruments;
-  } catch (error) {
-    throw new Error('Failed to fetch trading pairs: ' + error.message);
-  }
-};
-
-// Get market depth
-export const getMarketDepth = async (instrumentName) => {
-  try {
-    const response = await apiCall('GET', '/public/get-book', {
-      instrument_name: instrumentName,
-      depth: 50,
-    });
-    return response.result.data;
-  } catch (error) {
-    throw new Error('Failed to fetch market depth: ' + error.message);
-  }
-};
-
-// Get candlestick data
-export const getCandlesticks = async (instrumentName, timeframe = '1D') => {
-  try {
-    const response = await apiCall('GET', '/public/get-candlestick', {
-      instrument_name: instrumentName,
-      timeframe,
-    });
-    return response.result.data;
-  } catch (error) {
-    throw new Error('Failed to fetch candlestick data: ' + error.message);
-  }
-};
-
-// Error handling utility
-export const handleApiError = (error) => {
-  // Add any specific error handling logic here
-  console.error('API Error:', error);
-
-  if (error.message.includes('authentication')) {
-    return {
-      type: 'AUTH_ERROR',
-      message: 'Authentication failed. Please check your API credentials.',
-    };
-  }
-
-  if (error.message.includes('rate limit')) {
-    return {
-      type: 'RATE_LIMIT',
-      message: 'Rate limit exceeded. Please try again later.',
-    };
-  }
-
-  return {
-    type: 'GENERAL_ERROR',
-    message: 'An unexpected error occurred. Please try again.',
-  };
 };

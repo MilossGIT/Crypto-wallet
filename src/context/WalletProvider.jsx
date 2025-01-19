@@ -1,48 +1,58 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import PropTypes from 'prop-types';
 import { WalletContext } from './WalletContext';
-import { fetchMarketData } from '../services/api';
+import { fetchMarketDataWithCache } from '../services/api';
 
-const WalletProvider = ({ children }) => {
-    const [marketData, setMarketData] = useState(null);
-    const [notifications, setNotifications] = useState([]);
-    const [error, setError] = useState(null);
-    const [loading, setLoading] = useState(true);
-
-    const [walletBalances] = useState({
-        bitcoin: 0.5,
-        ethereum: 2.0,
-        dogecoin: 1000
+export const WalletProvider = ({ children }) => {
+    const [state, setState] = useState({
+        marketData: null,
+        loading: true,
+        error: null,
+        notifications: [],
+        walletBalances: {
+            bitcoin: 0.5,
+            ethereum: 2.0,
+            dogecoin: 1000
+        }
     });
 
-    useEffect(() => {
-        const updateMarketData = async () => {
-            try {
-                const data = await fetchMarketData();
-                setMarketData(data);
-                setLoading(false);
-            } catch (err) {
-                setError("Failed to fetch market data");
-                console.error(err);
-            }
-        };
-
-        updateMarketData();
-        const interval = setInterval(updateMarketData, 30000);
-        return () => clearInterval(interval);
+    const fetchData = useCallback(async () => {
+        console.log('Fetching new data...'); // Debug log
+        try {
+            setState(prev => ({ ...prev, loading: true }));
+            const data = await fetchMarketDataWithCache();
+            console.log('Received new data:', data); // Debug log
+            setState(prev => ({
+                ...prev,
+                marketData: data,
+                loading: false,
+                error: null
+            }));
+        } catch (err) {
+            console.error('Data fetch error:', err);
+            setState(prev => ({
+                ...prev,
+                error: err.message || 'Failed to fetch market data',
+                loading: false
+            }));
+        }
     }, []);
 
+    useEffect(() => {
+        console.log('Setting up data fetching...'); // Debug log
+        fetchData();
+        const interval = setInterval(fetchData, 30000);
+
+        return () => {
+            console.log('Cleaning up...'); // Debug log
+            clearInterval(interval);
+        };
+    }, [fetchData]);
+
+    console.log('Current state:', state); // Debug log
+
     return (
-        <WalletContext.Provider
-            value={{
-                marketData,
-                walletBalances,
-                notifications,
-                error,
-                loading,
-                setNotifications
-            }}
-        >
+        <WalletContext.Provider value={state}>
             {children}
         </WalletContext.Provider>
     );
